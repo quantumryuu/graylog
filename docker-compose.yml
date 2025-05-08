@@ -1,0 +1,89 @@
+services:
+  mongodb:
+    image: "mongo:6.0.18"
+    container_name: mongodb
+    restart: "always"
+    volumes:
+      - "./mongodb:/data/db"
+    networks:
+      - graylog
+
+  opensearch:
+    image: "opensearchproject/opensearch:2.15.0"
+    container_name: opensearch
+    restart: "always"
+    environment:
+      - OPENSEARCH_JAVA_OPTS=-Xms4g -Xmx4g
+      - bootstrap.memory_lock=true
+      - discovery.type=single-node
+      - action.auto_create_index=false
+      - plugins.security.ssl.http.enabled=false
+      - plugins.security.disabled=true
+      - OPENSEARCH_INITIAL_ADMIN_PASSWORD="RANDOMPASSWORD" # Generate a password via "tr -dc A-Z-a-z-0-9_@#%^-_=+ < /dev/urandom | head -c${1:-32}"
+    volumes:
+      - "./opensearch:/usr/share/opensearch/data"  
+    networks:
+      - graylog
+
+  graylog:
+    image: "graylog/graylog:6.0"
+    container_name: graylog
+    restart: "always"
+    environment:
+      # -------------------------------- Passwords ------------------------------- #
+      - GRAYLOG_PASSWORD_SECRET="$RANDOMPASSWORD" # Generate a password via "tr -dc A-Z-a-z-0-9_@#%^-_=+ < /dev/urandom | head -c${1=-32}"
+      - GRAYLOG_ROOT_PASSWORD_SHA2="$RANDOMSHA256PASSWORD" # Generate a password via "echo -n PASSWORD | sha256sum"
+
+      # --------------------- Connections with DB/OpenSearch --------------------- #
+      - GRAYLOG_ELASTICSEARCH_HOSTS="http://opensearch:9200"
+      - GRAYLOG_MONGODB_URI="mongodb://mongodb:27017/graylog"
+
+      # ------------------------------ HTTP settings ----------------------------- #
+      - GRAYLOG_HTTP_BIND_ADDRESS="0.0.0.0:9000"
+      - GRAYLOG_HTTP_ENABLE_GZIP=true
+      - GRAYLOG_HTTP_ENABLE_TLS=false
+      #- GRAYLOG_HTTP_TLS_CERT_FILE="/usr/share/graylog/data/pki/graylog.crt"
+      #- GRAYLOG_HTTP_TLS_KEY_FILE="/usr/share/graylog/data/pki/graylog.key"
+      #- GRAYLOG_HTTP_EXTERNAL_URI="https://host.domain.tld/"
+
+      # ----------------------------- Email Settings ----------------------------- #
+      #- GRAYLOG_ROOT_EMAIL="account@domain.tld"
+      #- GRAYLOG_TRANSPORT_EMAIL_ENABLED=true
+      #- GRAYLOG_TRANSPORT_EMAIL_HOSTNAME="SERVER"
+      #- GRAYLOG_TRANSPORT_EMAIL_PORT=25
+      #- GRAYLOG_TRANSPORT_EMAIL_USE_AUTH=false
+      #- GRAYLOG_TRANSPORT_EMAIL_USE_TLS=true
+      #- GRAYLOG_TRANSPORT_EMAIL_SUBJECT_PREFIX="[GRAYLOG]"
+      #- GRAYLOG_TRANSPORT_EMAIL_FROM_EMAIL="DISPLAY NAME <account@domain.tld>"
+
+      # ------------------------------ Misc Settings ----------------------------- #
+      - GRAYLOG_SERVER_JAVA_OPTS="-Xms4g -Xmx4g -server -Djavax.net.ssl.trustStore=/usr/share/graylog/data/pki/cacerts.jks"
+      - GRAYLOG_NODE_ID_FILE="/usr/share/graylog/data/config/node-id"
+      - GRAYLOG_ROOT_TIMEZONE="Europe/Athens"
+      - GRAYLOG_REPORT_DISABLE_SANDBOX="true"
+    volumes:
+      - "./graylog/data:/usr/share/graylog/data/data"
+      - "./graylog/config:/usr/share/graylog/data/config"
+      - "./graylog/journal:/usr/share/graylog/data/journal"
+      - "./graylog/pki:/usr/share/graylog/data/pki"
+      - "/etc/timezone:/etc/timezone:ro"
+      - "/etc/localtime:/etc/localtime:ro"
+    ports:
+      - "9000:9000/tcp"       # Graylog web interface and REST API
+      - "5044:5044/tcp"       # Beats
+      - "514:5140/tcp"        # Syslog TCP
+      - "514:5140/udp"        # Syslog UDP
+      - "12201:12201/tcp"     # GELF TCP
+      - "12201:12201/udp"     # GELF UDP
+      - "13301:13301/tcp"     # Forwarder data
+      - "13302:13302/tcp"     # Forwarder config
+    depends_on:
+      - mongodb
+      - opensearch
+    entrypoint: "/usr/bin/tini -- wait-for-it opensearch:9200 -- /docker-entrypoint.sh"
+    networks:
+      - graylog
+
+networks:
+  graylog:
+    external: true
